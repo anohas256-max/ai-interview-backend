@@ -79,3 +79,28 @@ class CurrentUserView(APIView):
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
+
+
+        
+        # 👇 НОВАЯ ВЬЮХА ДЛЯ ПРОВЕРКИ ИМЕНИ НА ЛЕТУ 👇
+class CheckUsernameView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        username = request.query_params.get('username', '')
+        if not username:
+            return Response({'is_taken': False})
+        is_taken = User.objects.filter(username__iexact=username).exists()
+        return Response({'is_taken': is_taken})
+
+
+        # 👇 НОВАЯ ВЬЮХА ДЛЯ ПРОВЕРКИ EMAIL НА ЛЕТУ 👇
+class CheckEmailView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        email = request.query_params.get('email', '')
+        if not email:
+            return Response({'is_taken': False})
+        is_taken = User.objects.filter(email__iexact=email).exists()
+        return Response({'is_taken': is_taken})

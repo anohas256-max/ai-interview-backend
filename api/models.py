@@ -24,7 +24,6 @@ class InterviewTemplate(models.Model):
 
     title = models.CharField(max_length=200, verbose_name="Профессия / Тема")
     description = models.TextField(blank=True, verbose_name="Описание (Легенда)")
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Цена (монет)") 
     
     # 👇 2. САМО ПОЛЕ 👇
     mode = models.CharField(

@@ -22,7 +22,7 @@ class InterviewTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = InterviewTemplate
         fields = (
-            "id", "title", "description", "price", "is_active", 
+            "id", "title", "description", "is_active", 
             "image", "image_url", "owner", "owner_name", 
             "category", "category_id", "created_at"
         )
@@ -66,7 +66,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         return user
 
-# 👇 НОВЫЙ КЛАСС (Отдает безопасные данные для профиля) 👇
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User

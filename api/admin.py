@@ -9,7 +9,7 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(InterviewTemplate)
 class InterviewTemplateAdmin(admin.ModelAdmin):
-    list_display = ("id", "title", "category", "price", "is_active", "is_deleted", "owner")
+    list_display = ("id", "title", "category", "is_active", "is_deleted", "owner")
     list_filter = ("is_active", "is_deleted", "category")
     search_fields = ("title", "description")
 
