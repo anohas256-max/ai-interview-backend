@@ -80,6 +80,15 @@ class CurrentUserView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
+    # 👇 ДОБАВЛЯЕМ ЭТОТ БЛОК 👇
+    def patch(self, request):
+        # partial=True значит, что мы можем обновить только имя, не трогая пароль и почту
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+
 
         
         # 👇 НОВАЯ ВЬЮХА ДЛЯ ПРОВЕРКИ ИМЕНИ НА ЛЕТУ 👇
