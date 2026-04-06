@@ -113,3 +113,28 @@ class CheckEmailView(APIView):
             return Response({'is_taken': False})
         is_taken = User.objects.filter(email__iexact=email).exists()
         return Response({'is_taken': is_taken})
+    
+
+    from django.contrib.auth import update_session_auth_hash
+from rest_framework import status
+
+from rest_framework import status
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+        
+        user = request.user
+
+        if not user.check_password(old_password):
+            return Response({"error": "current_password_incorrect"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        
+        # Строчку с update_session_auth_hash МЫ УДАЛИЛИ
+        
+        return Response({"message": "success"}, status=status.HTTP_200_OK)

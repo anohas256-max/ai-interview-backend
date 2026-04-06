@@ -18,15 +18,32 @@ class InterviewTemplateSerializer(serializers.ModelSerializer):
         write_only=True
     )
     image_url = serializers.SerializerMethodField()
+    
+    # 👇 Перехватываем стандартные поля 👇
+    title = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
 
     class Meta:
         model = InterviewTemplate
         fields = (
-            "id", "title", "description", "is_active", 
+            "id", "title", "description", "is_active", "mode", # 👈 добавил mode
             "image", "image_url", "owner", "owner_name", 
             "category", "category_id", "created_at"
         )
         read_only_fields = ("id", "owner", "owner_name", "created_at", "image_url", "category")
+
+    # 👇 Магия перевода на лету 👇
+    def get_title(self, obj):
+        request = self.context.get("request")
+        if request and request.query_params.get("lang") == "en" and obj.title_en:
+            return obj.title_en
+        return obj.title
+
+    def get_description(self, obj):
+        request = self.context.get("request")
+        if request and request.query_params.get("lang") == "en" and obj.description_en:
+            return obj.description_en
+        return obj.description
 
     def get_image_url(self, obj):
         request = self.context.get("request")
@@ -66,8 +83,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         return user
 
-# 👇 ОБНОВЛЕННЫЙ КЛАСС (Добавили first_name) 👇
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name') # 👈 Добавили сюда
+        fields = ('id', 'username', 'email', 'first_name')

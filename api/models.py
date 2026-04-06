@@ -16,16 +16,19 @@ class Category(models.Model):
 
 
 class InterviewTemplate(models.Model):
-    # 👇 1. ВАРИАНТЫ РЕЖИМОВ 👇
     MODE_CHOICES = (
         ('roleplay', 'Сюжетное собеседование'),
         ('quiz', 'Проверка знаний (Викторина)'),
     )
 
-    title = models.CharField(max_length=200, verbose_name="Профессия / Тема")
-    description = models.TextField(blank=True, verbose_name="Описание (Легенда)")
+    # 👇 Базовые (русские) поля
+    title = models.CharField(max_length=200, verbose_name="Профессия / Тема (RU)")
+    description = models.TextField(blank=True, verbose_name="Описание (RU)")
     
-    # 👇 2. САМО ПОЛЕ 👇
+    # 👇 НОВЫЕ АНГЛИЙСКИЕ ПОЛЯ 👇
+    title_en = models.CharField(max_length=200, blank=True, null=True, verbose_name="Профессия / Тема (EN)")
+    description_en = models.TextField(blank=True, null=True, verbose_name="Описание (EN)")
+    
     mode = models.CharField(
         max_length=20, 
         choices=MODE_CHOICES, 
@@ -50,17 +53,12 @@ class InterviewTemplate(models.Model):
 
 
 class SessionHistory(models.Model):
-    # Модель для сохранения результатов твоих пройденных собеседований
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="history")
     template = models.ForeignKey(InterviewTemplate, on_delete=models.SET_NULL, null=True, related_name="history")
-    
     score = models.DecimalField(max_digits=4, decimal_places=1, default=0.0)
     is_finished = models.BooleanField(default=False)
     is_failed = models.BooleanField(default=False)
-    
-    # Сюда мы будем класть ВЕСЬ лог чата и JSON аналитики
     full_data_json = models.JSONField(default=dict, blank=True)
-    
     is_deleted = models.BooleanField(default=False, verbose_name="В корзине (Soft Delete)")
     created_at = models.DateTimeField(auto_now_add=True)
 
