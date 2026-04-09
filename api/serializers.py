@@ -83,7 +83,12 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         return user
 
+# 👇 ДОБАВЛЯЕМ coins_balance В СЕРИАЛИЗАТОР 👇
 class UserSerializer(serializers.ModelSerializer):
+    # Достаем баланс из связанной модели UserProfile
+    coins_balance = serializers.IntegerField(source='profile.coins_balance', read_only=True)
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name')
+        # Обязательно добавь "coins_balance" в список полей
+        fields = ("id", "username", "email", "coins_balance")

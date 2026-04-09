@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 # 👇 Добавили CheckUsernameView 👇
 
-from .views import CategoryViewSet, InterviewTemplateViewSet, SessionHistoryViewSet, RegisterView, CurrentUserView, CheckUsernameView, CheckEmailView, ChangePasswordView
+from .views import AIChatView, CategoryViewSet, InterviewTemplateViewSet, SessionHistoryViewSet, RegisterView, CurrentUserView, CheckUsernameView, CheckEmailView, ChangePasswordView, StartSessionView
 
 router = DefaultRouter()
 router.register("categories", CategoryViewSet, basename="categories")
@@ -12,7 +12,9 @@ router.register("history", SessionHistoryViewSet, basename="history")
 urlpatterns = [
     path("", include(router.urls)),
     path("register/", RegisterView.as_view(), name="register"),
+    path('chat/', AIChatView.as_view(), name='ai-chat'),
     path("users/me/", CurrentUserView.as_view(), name="current_user"),
     path("check-username/", CheckUsernameView.as_view(), name="check_username"), # 👈 Новый путь
     path("change-password/", ChangePasswordView.as_view(), name="change_password"),
+    path('start-session/', StartSessionView.as_view(), name='start-session'),
 ]

@@ -68,3 +68,35 @@ class SessionHistory(models.Model):
     class Meta:
         verbose_name = "История сессии"
         verbose_name_plural = "История сессий"
+
+
+
+        # 👇 ДОБАВЛЯЕМ В САМЫЙ НИЗ ФАЙЛА models.py 👇
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+class UserProfile(models.Model):
+    # Связь 1-к-1: У одного юзера ровно один профиль
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile", verbose_name="Пользователь")
+    
+    # Наш баланс монет. Выдаем 10 приветственных монет при регистрации.
+    coins_balance = models.IntegerField(default=10, verbose_name="Баланс монет ⚡️")
+
+    def __str__(self):
+        return f"Профиль {self.user.username} ({self.coins_balance} ⚡️)"
+
+    class Meta:
+        verbose_name = "Профиль пользователя"
+        verbose_name_plural = "Профили пользователей"
+
+# СИГНАЛ: Автоматически создаем UserProfile, когда кто-то регистрирует нового User
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+# Сохраняем профиль при сохранении юзера
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    instance.profile.save()
