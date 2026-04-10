@@ -260,8 +260,10 @@ class StartSessionView(APIView):
         question_limit = config.get('questionLimit', 5)
         
         # --- ФОРМУЛА СТОИМОСТИ ---
-        # Например: 1 вопрос = 1 монета. Бесконечный режим (questionLimit=0) = 15 монет.
-        cost = 15 if question_limit == 0 else question_limit
+        is_endless = config.get('isEndlessMode', False)
+
+        # Бесконечный = 55. Иначе: кол-во вопросов * 0.5
+        cost = 55.0 if is_endless else (question_limit * 0.5)
 
         # Используем transaction.atomic, чтобы списание монет и создание сессии 
         # произошли одновременно. Если одно упадет, второе откатится (защита от багов)

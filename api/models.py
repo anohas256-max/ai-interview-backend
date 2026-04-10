@@ -81,7 +81,9 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile", verbose_name="Пользователь")
     
     # Наш баланс монет. Выдаем 10 приветственных монет при регистрации.
-    coins_balance = models.IntegerField(default=10, verbose_name="Баланс монет ⚡️")
+    # БЫЛО: coins_balance = models.IntegerField(...)
+    # СТАЛО:
+    coins_balance = models.FloatField(default=10.0, verbose_name="Баланс монет ⚡️")
 
     def __str__(self):
         return f"Профиль {self.user.username} ({self.coins_balance} ⚡️)"
