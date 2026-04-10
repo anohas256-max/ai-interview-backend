@@ -1,18 +1,24 @@
 import requests
 from django.conf import settings
+from django.db import transaction
+from django.contrib.auth import get_user_model
 
-from rest_framework import viewsets, permissions, generics
-from rest_framework.views import APIView # 👈 Добавили для профиля
-from rest_framework.response import Response # 👈 Добавили для профиля
+from rest_framework import viewsets, permissions, generics, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from rest_framework.permissions import AllowAny, IsAuthenticated # 👈 Добавили IsAuthenticated
-from django.contrib.auth import get_user_model
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .models import Category, InterviewTemplate, SessionHistory
-# 👇 Добавили UserSerializer в импорт
-from .serializers import CategorySerializer, InterviewTemplateSerializer, SessionHistorySerializer, RegisterSerializer, UserSerializer
+from .serializers import (
+    CategorySerializer, 
+    InterviewTemplateSerializer, 
+    SessionHistorySerializer, 
+    RegisterSerializer, 
+    UserSerializer
+)
 from .permissions import IsAdminOrReadOnly
 
 User = get_user_model()
@@ -75,7 +81,7 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
-# 👇 НОВАЯ ВЬЮХА (Выдает имя текущего юзера по токену) 👇
+# --- ПРОФИЛЬ ---
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -83,18 +89,13 @@ class CurrentUserView(APIView):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
 
-    # 👇 ДОБАВЛЯЕМ ЭТОТ БЛОК 👇
     def patch(self, request):
-        # partial=True значит, что мы можем обновить только имя, не трогая пароль и почту
         serializer = UserSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=400)
 
-
-        
-        # 👇 НОВАЯ ВЬЮХА ДЛЯ ПРОВЕРКИ ИМЕНИ НА ЛЕТУ 👇
 class CheckUsernameView(APIView):
     permission_classes = [AllowAny]
 
@@ -105,8 +106,6 @@ class CheckUsernameView(APIView):
         is_taken = User.objects.filter(username__iexact=username).exists()
         return Response({'is_taken': is_taken})
 
-
-        # 👇 НОВАЯ ВЬЮХА ДЛЯ ПРОВЕРКИ EMAIL НА ЛЕТУ 👇
 class CheckEmailView(APIView):
     permission_classes = [AllowAny]
 
@@ -117,12 +116,6 @@ class CheckEmailView(APIView):
         is_taken = User.objects.filter(email__iexact=email).exists()
         return Response({'is_taken': is_taken})
     
-
-    from django.contrib.auth import update_session_auth_hash
-from rest_framework import status
-
-from rest_framework import status
-
 class ChangePasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -138,115 +131,125 @@ class ChangePasswordView(APIView):
         user.set_password(new_password)
         user.save()
         
-        # Строчку с update_session_auth_hash МЫ УДАЛИЛИ
-        
         return Response({"message": "success"}, status=status.HTTP_200_OK)
     
-
-
+# --- ИНТЕГРАЦИЯ С ИИ И СЕССИИ ---
 class AIChatView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         data = request.data
         user_message = data.get('userMessage', '')
-        history = data.get('history', [])
-        config = data.get('config', {})
-        user_legend = data.get('userLegend', '')
-        asked_questions = data.get('askedQuestions', [])
+        session_id = data.get('sessionId')
 
-        is_eng = config.get('language') == 'English'
-
-        # --- СОБИРАЕМ ПАМЯТЬ ---
-        user_name = config.get('userName', 'User')
-        memory_block = f"CANDIDATE NAME: {user_name}.\n" if is_eng else f"ИМЯ КАНДИДАТА: {user_name}.\n"
-
-        user_bio = config.get('userBio', '')
-        if user_bio:
-            memory_block += f"CANDIDATE PROFILE: {user_bio}.\n" if is_eng else f"ПРОФИЛЬ КАНДИДАТА: {user_bio}.\n"
-
-        if user_legend:
-            memory_block += f"ANSWER TO 'TELL ME ABOUT YOURSELF': {user_legend}\n" if is_eng else f"ОТВЕТ НА 'РАССКАЖИ О СЕБЕ': {user_legend}\n"
-
-        if asked_questions:
-            joined_q = ' | '.join(asked_questions)
-            memory_block += f"ASKED QUESTIONS (do not repeat!): {joined_q}.\n" if is_eng else f"УЖЕ ЗАДАННЫЕ ВОПРОСЫ (не повторяйся!): {joined_q}.\n"
-
-        # --- ПРАВИЛА ---
-        anti_troll = (
-            "ANTI-TROLLING RULE: If user spams nonsense or insults, refuse coldly and add [FAIL] at the end." if is_eng else
-            "ЗАЩИТА ОТ ТРОЛЛИНГА: Если юзер спамит бредом или оскорбляет, холодно откажи и добавь [FAIL] в конце."
-        )
-
-        lang_rule = (
-            "CRITICAL RULE: YOU MUST SPEAK EXCLUSIVELY IN ENGLISH." if is_eng else
-            "КРИТИЧЕСКОЕ ПРАВИЛО: ТЫ ОБЯЗАН ГОВОРИТЬ ИСКЛЮЧИТЕЛЬНО НА РУССКОМ ЯЗЫКЕ."
-        )
-
-        role = config.get('role', '')
-        difficulty = config.get('difficulty', '')
-        persona = config.get('persona', '')
-        feedback_style = config.get('feedbackStyle', '')
-
-        if config.get('isRoleplayMode', True):
-            if is_eng:
-                sys_inst = (
-                    f"Roleplay interview. YOU ARE THE INTERVIEWER. Persona: '{persona}', Style: {feedback_style}. Candidate applies for: '{role}'. Diff: {difficulty}.\n"
-                    f"1. Invent a name FOR YOURSELF matching your persona and introduce yourself. 2. Address the candidate by their name.\n"
-                    f"3. Natural speech. 4. {lang_rule}. 5. {anti_troll}.\n"
-                    "6. NEVER praise for a correct answer, just make it harder.\n"
-                    "7. Max 2 messages per topic. Then change the subject.\n"
-                    f"{memory_block}"
-                )
-            else:
-                sys_inst = (
-                    f"Сюжетное собеседование. ТЫ — ИНТЕРВЬЮЕР. Твой характер: '{persona}', Стиль: {feedback_style}. Кандидат пришел на должность: '{role}'. Сложность: {difficulty}.\n"
-                    f"1. Придумай СЕБЕ подходящее имя (учитывая свой пол и характер) и представься. 2. Обращайся к кандидату по ЕГО имени.\n"
-                    f"3. Живая речь. 4. {lang_rule}. 5. {anti_troll}.\n"
-                    "6. РЕЖИМ «ДОЖИМ»: Если ответ верный, НИКОГДА не хвали, сразу усложняй.\n"
-                    "7. Максимум 2 сообщения на тему! Потом меняй подтему.\n"
-                    f"{memory_block}"
-                )
-        else:
-            diff_rules = "Ask basic questions." if ("Junior" in difficulty or "Легкий" in difficulty) else ("Ask expert questions." if ("Senior" in difficulty or "Сложный" in difficulty) else "Ask intermediate questions.")
-            if is_eng:
-                sys_inst = f"AI-examiner for: '{role}'. {lang_rule}. Style: {feedback_style}. DIFF: {difficulty}. {diff_rules}\nFormat: 1 question at a time. {anti_troll}.\n{memory_block}"
-            else:
-                sys_inst = f"Экзаменатор по: '{role}'. {lang_rule}. Стиль: {feedback_style}. СЛОЖНОСТЬ: {difficulty}. {diff_rules}\nФормат: 1 вопрос за раз. {anti_troll}.\n{memory_block}"
-
-
-
-        messages = [{"role": "system", "content": sys_inst}]
-
-        for msg in history:
-            messages.append({"role": "user" if msg.get("isUser") else "assistant", "content": msg.get("text")})
-        messages.append({"role": "user", "content": user_message})
-
-        if not getattr(settings, 'OPENROUTER_API_KEY', None):
-            return Response({"error": "API key missing"}, status=500)
+        if not session_id:
+            return Response({"error": "sessionId is required"}, status=400)
 
         try:
+            session = SessionHistory.objects.get(id=session_id, user=request.user)
+            
+            full_data = session.full_data_json or {"messages": []}
+            messages_history = full_data.get('messages', [])
+            config = data.get('config', {}) 
+
+            # Сохраняем сообщение юзера ПРЯМО СЕЙЧАС
+            messages_history.append({"isUser": True, "text": user_message, "timestamp": str(request.user.profile.user.date_joined)})
+            session.full_data_json['messages'] = messages_history
+            session.save()
+
+            is_eng = config.get('language') == 'English'
+            user_name = config.get('userName', 'User')
+            user_bio = config.get('userBio', '')
+            user_legend = data.get('userLegend', '')
+            asked_questions = data.get('askedQuestions', [])
+            
+            persona = config.get('persona', '')
+            feedback_style = config.get('feedbackStyle', '')
+            role = config.get('role', '')
+            difficulty = config.get('difficulty', '')
+
+            # Выбор промпта в зависимости от режима
+            if config.get('isRoleplayMode'):
+                if is_eng:
+                    sys_inst = f"""You are an INTERVIEWER conducting an interview for the position: '{role}'.
+Your name/persona: {persona}.
+Difficulty level: {difficulty}.
+Feedback style: {feedback_style}.
+Candidate's name: {user_name}.
+Candidate's bio: {user_bio if user_bio else "Not provided"}.
+Candidate's intro/legend: {user_legend if user_legend else "Not provided"}.
+
+RULES:
+1. Conduct the interview ONE QUESTION AT A TIME. DO NOT send a list of questions. Wait for the candidate's answer.
+2. The questions should be technically accurate and appropriate for the specified role and difficulty.
+3. Stay strictly in character ({persona}).
+4. Use the specified feedback style ({feedback_style}) to react to the candidate's answers.
+5. Do NOT repeat questions you have already asked. Previously asked questions: {asked_questions}.
+6. CRITICAL: If the user says something completely irrelevant or hallucinates, politely steer them back or ask a clarifying question. DO NOT break character.
+"""
+                else:
+                    sys_inst = f"""Ты — ИНТЕРВЬЮЕР, проводишь собеседование на позицию: '{role}'.
+Твоя роль/характер: {persona}.
+Уровень сложности: {difficulty}.
+Стиль общения: {feedback_style}.
+Имя кандидата: {user_name}.
+Био кандидата: {user_bio if user_bio else "Не указано"}.
+Легенда/вводная кандидата: {user_legend if user_legend else "Не указано"}.
+
+ПРАВИЛА:
+1. Задавай ровно ПО ОДНОМУ вопросу за раз. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдавать список вопросов. Жди ответ.
+2. Вопросы должны быть технически грамотными и соответствовать роли и сложности.
+3. Строго отыгрывай свою роль ({persona}).
+4. Используй выбранный стиль общения ({feedback_style}) для реакции на ответы.
+5. НЕ повторяй вопросы. Список уже заданных: {asked_questions}.
+6. КРИТИЧНО: Если кандидат несет бред или уходит от темы, вежливо (в рамках роли) верни его к сути или задай уточняющий вопрос. Не ломай персонажа.
+"""
+            else:
+                sys_inst = f"""You are conducting a strict knowledge QUIZ on the topic: '{role}'.
+Difficulty: {difficulty}. Style: {feedback_style}. User: {user_name}.
+Rule: Ask ONE clear, direct question about this topic. Wait for the answer. Grade it based on your style.""" if is_eng else f"""Ты проводишь строгий КВИЗ/Викторину по теме: '{role}'.
+Сложность: {difficulty}. Стиль: {feedback_style}. Пользователь: {user_name}.
+Правило: Задай ОДИН четкий вопрос по теме. Жди ответ. Оценивай строго в своем стиле."""
+
+            # Готовим пакет сообщений
+            api_messages = [{"role": "system", "content": sys_inst}]
+            for msg in messages_history:
+                api_messages.append({
+                    "role": "user" if msg.get("isUser") else "assistant", 
+                    "content": msg.get("text")
+                })
+
             response = requests.post(
                 'https://openrouter.ai/api/v1/chat/completions',
                 headers={'Authorization': f'Bearer {settings.OPENROUTER_API_KEY}'},
-                json={"model": config.get("modelName", "google/gemini-2.5-flash"), "messages": messages, "max_tokens": 8000},
+                json={
+                    "model": config.get("modelName", "google/gemini-2.0-flash-exp:free"), 
+                    "messages": api_messages,
+                    "max_tokens": 1000
+                },
                 timeout=60
             )
             response.raise_for_status()
-            res_data = response.json()
+            res_json = response.json()
+            ai_text = res_json['choices'][0]['message']['content']
+
+            # Сохраняем ответ ИИ
+            messages_history.append({"isUser": False, "text": ai_text})
+            session.full_data_json['messages'] = messages_history
+            session.save()
+
             return Response({
-                "text": res_data['choices'][0]['message']['content'],
-                "inputTokens": res_data.get('usage', {}).get('prompt_tokens', 0),
-                "outputTokens": res_data.get('usage', {}).get('completion_tokens', 0),
-                "cost": res_data.get('usage', {}).get('total_cost', 0.0)
+                "text": ai_text,
+                "inputTokens": res_json.get('usage', {}).get('prompt_tokens', 0),
+                "outputTokens": res_json.get('usage', {}).get('completion_tokens', 0),
+                "cost": res_json.get('usage', {}).get('total_cost', 0.0)
             })
+
+        except SessionHistory.DoesNotExist:
+            return Response({"error": "Session not found"}, status=404)
         except Exception as e:
-            return Response({"text": f"⚠️ Server Error: {str(e)}", "inputTokens": 0, "outputTokens": 0, "cost": 0.0})
-        
+            return Response({"text": f"⚠️ Server Error: {str(e)}"}, status=500)
 
-        # 👇 ДОБАВЛЯЕМ В САМЫЙ НИЗ ФАЙЛА views.py 👇
-
-from django.db import transaction
 
 class StartSessionView(APIView):
     permission_classes = [IsAuthenticated]
@@ -255,41 +258,29 @@ class StartSessionView(APIView):
         user = request.user
         data = request.data
         
-        # Получаем настройки из Флаттера
         config = data.get('config', {})
         question_limit = config.get('questionLimit', 5)
         
-        # --- ФОРМУЛА СТОИМОСТИ ---
         is_endless = config.get('isEndlessMode', False)
-
-        # Бесконечный = 55. Иначе: кол-во вопросов * 0.5
         cost = 55.0 if is_endless else (question_limit * 0.5)
 
-        # Используем transaction.atomic, чтобы списание монет и создание сессии 
-        # произошли одновременно. Если одно упадет, второе откатится (защита от багов)
         with transaction.atomic():
-            # Достаем профиль юзера
             profile = user.profile
             
-            # Проверяем баланс
             if profile.coins_balance < cost:
                 return Response(
                     {"error": f"Недостаточно монет. Нужно: {cost} ⚡️, у вас: {profile.coins_balance} ⚡️"}, 
-                    status=402 # Payment Required
+                    status=402
                 )
             
-            # Списываем монеты и сохраняем
             profile.coins_balance -= cost
             profile.save()
             
-            # Создаем пустую сессию в базе
             new_session = SessionHistory.objects.create(
                 user=user,
-                # Сюда мы пишем только базовый конфиг, остальное заполнится по мере чата
                 full_data_json={"config": config, "messages": []} 
             )
 
-        # Отвечаем Флаттеру: Успех! Вот ID твоей новой сессии и твой новый баланс.
         return Response({
             "message": "Сессия начата",
             "session_id": new_session.id,

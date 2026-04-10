@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Category, InterviewTemplate, SessionHistory
+from .models import Category, InterviewTemplate, SessionHistory, UserProfile # 👈 Добавили UserProfile
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
@@ -17,3 +17,9 @@ class InterviewTemplateAdmin(admin.ModelAdmin):
 class SessionHistoryAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "template", "score", "is_finished", "is_failed", "is_deleted", "created_at")
     list_filter = ("is_finished", "is_failed", "is_deleted")
+
+# 👇 ДОБАВИЛИ ЭТОТ БЛОК 👇
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "coins_balance") 
+    search_fields = ("user__username", "user__email")
