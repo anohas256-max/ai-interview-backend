@@ -61,6 +61,7 @@ class SessionHistory(models.Model):
     full_data_json = models.JSONField(default=dict, blank=True)
     is_deleted = models.BooleanField(default=False, verbose_name="В корзине (Soft Delete)")
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Последнее изменение")
 
     def __str__(self):
         return f"Сессия {self.user.username} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
