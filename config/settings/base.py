@@ -24,8 +24,7 @@ load_dotenv() # Загружаем секреты из .env
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -158,7 +157,6 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.AllowAny",
     ],
 
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -167,12 +165,14 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10, 
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "AI Interview API",
-    "DESCRIPTION": "API для мобильного приложения собеседований (Каталог, История, JWT, Soft Delete)",
+    "TITLE": "Sobes AI API",
+    "DESCRIPTION": "API для системы тренировки собеседований и проверки знаний с ИИ",
     "VERSION": "1.0.0",
+    'SERVE_INCLUDE_SCHEMA': False,
 }
 
 

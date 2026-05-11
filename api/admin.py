@@ -21,5 +21,5 @@ class SessionHistoryAdmin(admin.ModelAdmin):
 # 👇 ДОБАВИЛИ ЭТОТ БЛОК 👇
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "coins_balance") 
+    list_display = ("id", "user", "role", "coins_balance")
     search_fields = ("user__username", "user__email")

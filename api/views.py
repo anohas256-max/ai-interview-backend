@@ -3,6 +3,7 @@ from django.conf import settings
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from datetime import timedelta
 
 from rest_framework import viewsets, permissions, generics, status
 from rest_framework.views import APIView
@@ -24,14 +25,23 @@ from .permissions import IsAdminOrReadOnly
 
 User = get_user_model()
 
-# --- КАТЕГОРИИ ---
 class CategoryViewSet(viewsets.ModelViewSet):
+    """
+    CRUD операции для категорий профессий.
+    Обычные пользователи могут только просматривать список (GET).
+    Администраторы могут создавать, изменять и удалять (POST, PUT, DELETE).
+    """
     queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
 
-# --- ШАБЛОНЫ ИНТЕРВЬЮ ---
 class InterviewTemplateViewSet(viewsets.ModelViewSet):
+    """
+    Управление шаблонами интервью (пресетами профессий).
+    Поддерживает фильтрацию по сфере, статусу активности и режиму.
+    Доступен полнотекстовый поиск по названию и описанию.
+    Удаление шаблонов является "мягким" (soft delete) — они просто скрываются.
+    """
     serializer_class = InterviewTemplateSerializer
     permission_classes = [IsAdminOrReadOnly]
     parser_classes = [MultiPartParser, FormParser]
@@ -58,13 +68,17 @@ class InterviewTemplateViewSet(viewsets.ModelViewSet):
         instance.is_deleted = True
         instance.save()
 
-# --- ИСТОРИЯ СЕССИЙ ---
 class SessionHistoryViewSet(viewsets.ModelViewSet):
+    """
+    Управление историей сессий текущего пользователя.
+    Возвращает список всех проведенных интервью, включая незавершенные.
+    При удалении (DELETE) применяется мягкое удаление (is_deleted=True).
+    Запрещено просматривать историю чужих пользователей.
+    """
     serializer_class = SessionHistorySerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Отдаем ВСЕ не удаленные сессии (и завершенные, и нет)
         return SessionHistory.objects.filter(
             user=self.request.user, 
             is_deleted=False
@@ -77,14 +91,22 @@ class SessionHistoryViewSet(viewsets.ModelViewSet):
         instance.is_deleted = True
         instance.save()
 
-# --- РЕГИСТРАЦИЯ ---
 class RegisterView(generics.CreateAPIView):
+    """
+    Регистрация нового пользователя.
+    Ожидает username, password и email.
+    Токены доступа генерируются и возвращаются сразу после успешного создания аккаунта.
+    """
     queryset = User.objects.all()
     permission_classes = (AllowAny,)
     serializer_class = RegisterSerializer
 
-# --- ПРОФИЛЬ ---
 class CurrentUserView(APIView):
+    """
+    Получение и редактирование профиля текущего пользователя.
+    GET — возвращает данные авторизованного юзера.
+    PATCH — позволяет частично обновить профиль (например, изменить имя).
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -99,6 +121,10 @@ class CurrentUserView(APIView):
         return Response(serializer.errors, status=400)
 
 class CheckUsernameView(APIView):
+    """
+    Проверка занятости никнейма.
+    Используется на этапе регистрации. Возвращает {"is_taken": true/false}.
+    """
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -109,6 +135,10 @@ class CheckUsernameView(APIView):
         return Response({'is_taken': is_taken})
 
 class CheckEmailView(APIView):
+    """
+    Проверка занятости email адреса.
+    Используется на этапе регистрации. Возвращает {"is_taken": true/false}.
+    """
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -119,12 +149,16 @@ class CheckEmailView(APIView):
         return Response({'is_taken': is_taken})
     
 class ChangePasswordView(APIView):
+    """
+    Изменение пароля пользователя.
+    Требует ввода текущего (старого) пароля и нового пароля.
+    В случае 5 неверных попыток клиентская часть должна блокировать доступ.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         old_password = request.data.get("old_password")
         new_password = request.data.get("new_password")
-        
         user = request.user
 
         if not user.check_password(old_password):
@@ -132,18 +166,118 @@ class ChangePasswordView(APIView):
 
         user.set_password(new_password)
         user.save()
-        
         return Response({"message": "success"}, status=status.HTTP_200_OK)
-    
-# --- ИНТЕГРАЦИЯ С ИИ И СЕССИИ ---
+
+class StartSessionView(APIView):
+    """
+    Инициализация новой сессии интервью.
+    Списывает баланс энергии (монет) в зависимости от выбранных настроек и лимита вопросов.
+    Создает запись в SessionHistory и возвращает session_id.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        data = request.data
+        
+        config = data.get('config', {})
+        question_limit = config.get('questionLimit', 5)
+        is_endless = config.get('isEndlessMode', False)
+        cost = 55.0 if is_endless else (question_limit * 0.5)
+
+        with transaction.atomic():
+            profile = user.profile
+            if profile.coins_balance < cost:
+                return Response(
+                    {"error": f"Недостаточно монет. Нужно: {cost} ⚡️, у вас: {profile.coins_balance} ⚡️"}, 
+                    status=402
+                )
+            profile.coins_balance -= cost
+            profile.save()
+            new_session = SessionHistory.objects.create(
+                user=user,
+                full_data_json={"config": config, "messages": []} 
+            )
+
+        return Response({
+            "message": "Сессия начата",
+            "session_id": new_session.id,
+            "cost": cost,
+            "new_balance": profile.coins_balance
+        }, status=200)
+
+class DailyRewardView(APIView):
+    """
+    Получение ежедневного бонуса (энергии).
+    Проверяет время с момента последнего начисления в профиле пользователя.
+    Если кулдаун (24 часа) прошел — начисляет 15 монет.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        profile = user.profile
+        now = timezone.now()
+        
+        REWARD_AMOUNT = 15.0
+        COOLDOWN_HOURS = 24
+
+        if profile.last_daily_reward:
+            time_since_last_reward = now - profile.last_daily_reward
+            if time_since_last_reward < timedelta(hours=COOLDOWN_HOURS):
+                time_left = timedelta(hours=COOLDOWN_HOURS) - time_since_last_reward
+                return Response({
+                    "success": False,
+                    "message": "Ежедневная награда пока недоступна.",
+                    "seconds_left": int(time_left.total_seconds()),
+                    "balance": profile.coins_balance
+                }, status=200) 
+
+        profile.coins_balance += REWARD_AMOUNT
+        profile.last_daily_reward = now
+        profile.save()
+
+        return Response({
+            "success": True,
+            "message": f"Получено {REWARD_AMOUNT} ⚡️",
+            "seconds_left": COOLDOWN_HOURS * 3600, 
+            "balance": profile.coins_balance
+        }, status=200)
+
+class AddEnergyView(APIView):
+    """
+    Пополнение баланса энергии (заглушка для платежной системы).
+    Добавляет указанное количество монет на баланс профиля.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        profile = user.profile
+        amount = float(request.data.get('amount', 10.0))
+        
+        profile.coins_balance += amount
+        profile.save()
+
+        return Response({
+            "success": True,
+            "message": f"Успешно добавлено {amount} ⚡️",
+            "balance": profile.coins_balance
+        }, status=200)
+
 class AIChatView(APIView):
+    """
+    Главный шлюз для общения с нейросетью.
+    Ветка 1: Если isAnalysis=True, отправляет JSON с историей чата в ИИ для выставления итогового балла.
+    Ветка 2: Обрабатывает реплики пользователя, собирает системный промпт с учетом истории и передает в OpenRouter.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         data = request.data
         session_id = data.get('sessionId')
         is_analysis = data.get('isAnalysis', False) 
-        is_limit_reached = data.get('isLimitReached', False) # 👈 ЛОВИМ ФЛАГ ЛИМИТА ОТ ФЛАТТЕРА
+        is_limit_reached = data.get('isLimitReached', False) 
 
         if not session_id:
             return Response({"error": "sessionId is required"}, status=400)
@@ -154,9 +288,6 @@ class AIChatView(APIView):
             messages_history = full_data.get('messages', [])
             config = data.get('config', {}) 
 
-            # ==========================================
-            # 🛑 ВЕТКА 1: ИЗОЛИРОВАННАЯ АНАЛИТИКА 🛑
-            # ==========================================
             if is_analysis:
                 user_message = data.get('userMessage', '')
                 api_messages = [
@@ -189,13 +320,9 @@ class AIChatView(APIView):
                 session.save()
                 return Response({"text": ai_text})
 
-            # ==========================================
-            # 💬 ВЕТКА 2: ОБЫЧНЫЙ ЧАТ И СТАРТ 💬
-            # ==========================================
             user_message = data.get('userMessage', '').strip()
             is_start_cmd = (user_message == "START_INTERVIEW")
 
-            # 🛑 СОХРАНЯЕМ В БАЗУ ТОЛЬКО РЕАЛЬНЫЕ СООБЩЕНИЯ ЮЗЕРА (Старт игнорируем)
             if not is_start_cmd:
                 messages_history.append({"isUser": True, "text": user_message, "timestamp": timezone.now().isoformat()})
                 session.full_data_json['messages'] = messages_history
@@ -212,7 +339,6 @@ class AIChatView(APIView):
             role = config.get('role', '')
             difficulty = config.get('difficulty', '')
 
-            # --- ВОССТАНОВЛЕНИЕ ИДЕАЛЬНОГО ПРОМПТА ИЗ GEMINI_API_SOURCE ---
             memory_block = f"CANDIDATE NAME: {user_name}.\n" if is_eng else f"ИМЯ КАНДИДАТА: {user_name}.\n"
             if user_bio: memory_block += f"CANDIDATE PROFILE: {user_bio}.\n" if is_eng else f"ПРОФИЛЬ КАНДИДАТА: {user_bio}.\n"
             if user_legend: memory_block += f"ANSWER TO 'TELL ME ABOUT YOURSELF': {user_legend}\n" if is_eng else f"ОТВЕТ НА 'РАССКАЖИ О СЕБЕ': {user_legend}\n"
@@ -275,7 +401,6 @@ class AIChatView(APIView):
                     f"7. {lang_rule}\n{memory_block}"
                 )
 
-            # 🛑 ФЛАТТЕР СКАЗАЛ ЧТО ЛИМИТ ДОСТИГНУТ — МЕНЯЕМ ПРАВИЛА
             if is_limit_reached:
                 if is_eng:
                     sys_inst += "\n\nCRITICAL OVERRIDE: THE INTERVIEW IS OVER. Evaluate the last answer, say goodbye, and MUST append [END] at the end of your response. DO NOT ASK ANY MORE QUESTIONS."
@@ -286,7 +411,6 @@ class AIChatView(APIView):
             for msg in messages_history:
                 api_messages.append({"role": "user" if msg.get("isUser") else "assistant", "content": msg.get("text")})
 
-            # 🛑 ЕСЛИ ЭТО ПЕРВОЕ СООБЩЕНИЕ (СТАРТ) — ПИХАЕМ СКРЫТЫЙ ПИНОК ИИ
             if is_start_cmd:
                 if config.get('includeLegend'):
                     start_prompt = "[SYSTEM: Greet the candidate by name, introduce yourself in your role, and ask them to briefly tell you about themselves.]" if is_eng else "[СИСТЕМНОЕ: Поздоровайся, обратившись по имени, представься в своей роли и попроси кандидата коротко рассказать о себе.]"
@@ -322,41 +446,29 @@ class AIChatView(APIView):
             return Response({"error": "Session not found"}, status=404)
         except Exception as e:
             return Response({"text": f"⚠️ Server Error: {str(e)}"}, status=500)
+        
+        # ==========================================
+# 🛡 ТЕСТОВЫЕ ЭНДПОИНТЫ ДЛЯ RBAC (ПРАКТИКА) 🛡
+# ==========================================
+from .permissions import IsAdminRole, IsManagerOrAdminRole
 
+class AdminOnlyTestView(APIView):
+    """ Эндпоинт только для администраторов """
+    permission_classes = [IsAdminRole]
 
-class StartSessionView(APIView):
+    def get(self, request):
+        return Response({"message": "СЕКРЕТНАЯ ИНФОРМАЦИЯ: Доступ разрешен. Вы — Администратор."})
+
+class ManagerAndAdminTestView(APIView):
+    """ Эндпоинт для менеджеров и администраторов """
+    permission_classes = [IsManagerOrAdminRole]
+
+    def get(self, request):
+        return Response({"message": "РАБОЧАЯ ИНФОРМАЦИЯ: Доступ разрешен. Ваша роль позволяет просматривать это."})
+
+class AllAuthTestView(APIView):
+    """ Эндпоинт для любого авторизованного пользователя (User, Manager, Admin) """
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        user = request.user
-        data = request.data
-        
-        config = data.get('config', {})
-        question_limit = config.get('questionLimit', 5)
-        
-        is_endless = config.get('isEndlessMode', False)
-        cost = 55.0 if is_endless else (question_limit * 0.5)
-
-        with transaction.atomic():
-            profile = user.profile
-            
-            if profile.coins_balance < cost:
-                return Response(
-                    {"error": f"Недостаточно монет. Нужно: {cost} ⚡️, у вас: {profile.coins_balance} ⚡️"}, 
-                    status=402
-                )
-            
-            profile.coins_balance -= cost
-            profile.save()
-            
-            new_session = SessionHistory.objects.create(
-                user=user,
-                full_data_json={"config": config, "messages": []} 
-            )
-
-        return Response({
-            "message": "Сессия начата",
-            "session_id": new_session.id,
-            "cost": cost,
-            "new_balance": profile.coins_balance
-        }, status=200)
+    def get(self, request):
+        return Response({"message": "ОБЩАЯ ИНФОРМАЦИЯ: Доступ разрешен. Вы успешно авторизованы."})
