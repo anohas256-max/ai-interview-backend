@@ -246,25 +246,21 @@ class DailyRewardView(APIView):
 
 class AddEnergyView(APIView):
     """
-    Пополнение баланса энергии (заглушка для платежной системы).
-    Добавляет указанное количество монет на баланс профиля.
+    Отключено.
+    Пополнение баланса должно происходить только через платежный webhook.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        user = request.user
-        profile = user.profile
-        amount = float(request.data.get('amount', 10.0))
-        
-        profile.coins_balance += amount
-        profile.save()
-
-        return Response({
-            "success": True,
-            "message": f"Успешно добавлено {amount} ⚡️",
-            "balance": profile.coins_balance
-        }, status=200)
-
+        return Response(
+            {
+                "error": "disabled",
+                "message": "Manual energy top-up is disabled. Use payment flow."
+            },
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    
 class AIChatView(APIView):
     """
     Главный шлюз для общения с нейросетью.
@@ -340,7 +336,15 @@ class AIChatView(APIView):
             difficulty = config.get('difficulty', '')
 
             memory_block = f"CANDIDATE NAME: {user_name}.\n" if is_eng else f"ИМЯ КАНДИДАТА: {user_name}.\n"
-            if user_bio: memory_block += f"CANDIDATE PROFILE: {user_bio}.\n" if is_eng else f"ПРОФИЛЬ КАНДИДАТА: {user_bio}.\n"
+            
+            # 👇 ОБНОВЛЕННАЯ ЛОГИКА БИОГРАФИИ (ЖЕСТКИЙ ПРИОРИТЕТ РОЛИ) 👇
+            if user_bio: 
+                memory_block += (
+                    f"BACKGROUND BIO (Secondary context): {user_bio}. CRITICAL: The interview strictly focuses on the role/topic '{role}'. Ignore the bio if it contradicts or distracts from the main role.\n"
+                ) if is_eng else (
+                    f"ФОНОВАЯ БИОГРАФИЯ (Вторичный контекст): {user_bio}. КРИТИЧЕСКИ ВАЖНО: Главная тема собеседования СТРОГО '{role}'. Игнорируй навыки из биографии, если они противоречат или отвлекают от основной темы '{role}'.\n"
+                )
+                
             if user_legend: memory_block += f"ANSWER TO 'TELL ME ABOUT YOURSELF': {user_legend}\n" if is_eng else f"ОТВЕТ НА 'РАССКАЖИ О СЕБЕ': {user_legend}\n"
             if asked_questions: memory_block += f"TOPICS AND QUESTIONS YOU ALREADY ASKED: {' | '.join(asked_questions)}.\n" if is_eng else f"ТЕМЫ И ВОПРОСЫ, КОТОРЫЕ ТЫ УЖЕ ЗАДАВАЛ: {' | '.join(asked_questions)}.\n"
 

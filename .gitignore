@@ -1,16 +1,29 @@
 # Секретные ключи и пароли
 .env
+.env.*
+!.env.example
 
-# Виртуальное окружение (весит очень много)
+# Виртуальное окружение
 venv/
 env/
+.venv/
 
 # База данных
 db.sqlite3
 
-# Медиафайлы (картинки шаблонов)
+# Медиафайлы
 media/
 
-# Кэш питона (системный мусор)
+# Static collectstatic output
+staticfiles/
+
+# Кэш питона
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
