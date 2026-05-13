@@ -171,78 +171,122 @@ class ChangePasswordView(APIView):
 class StartSessionView(APIView):
     """
     Инициализация новой сессии интервью.
-    Списывает баланс энергии (монет) в зависимости от выбранных настроек и лимита вопросов.
-    Создает запись в SessionHistory и возвращает session_id.
+    Списывает баланс энергии в зависимости от выбранных настроек и лимита вопросов.
+    Защищено от двойного списания через transaction.atomic + select_for_update.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         user = request.user
         data = request.data
-        
-        config = data.get('config', {})
-        question_limit = config.get('questionLimit', 5)
-        is_endless = config.get('isEndlessMode', False)
-        cost = 55.0 if is_endless else (question_limit * 0.5)
+
+        config = data.get("config", {})
+
+        question_limit = int(config.get("questionLimit", 5))
+        is_endless = bool(config.get("isEndlessMode", False))
+
+        if question_limit < 1:
+            return Response(
+                {"error": "questionLimit must be greater than 0"},
+                status=400
+            )
+
+        if question_limit > 100:
+            return Response(
+                {"error": "questionLimit is too large"},
+                status=400
+            )
+
+        cost = 55.0 if is_endless else question_limit * 0.5
 
         with transaction.atomic():
-            profile = user.profile
+            profile = user.profile.__class__.objects.select_for_update().get(user=user)
+
             if profile.coins_balance < cost:
                 return Response(
-                    {"error": f"Недостаточно монет. Нужно: {cost} ⚡️, у вас: {profile.coins_balance} ⚡️"}, 
+                    {
+                        "error": "not_enough_energy",
+                        "message": f"Недостаточно монет. Нужно: {cost} ⚡️, у вас: {profile.coins_balance} ⚡️",
+                        "required": cost,
+                        "balance": profile.coins_balance,
+                    },
                     status=402
                 )
+
             profile.coins_balance -= cost
-            profile.save()
+            profile.save(update_fields=["coins_balance"])
+
             new_session = SessionHistory.objects.create(
                 user=user,
-                full_data_json={"config": config, "messages": []} 
+                full_data_json={
+                    "config": config,
+                    "messages": [],
+                },
             )
 
         return Response({
             "message": "Сессия начата",
             "session_id": new_session.id,
             "cost": cost,
-            "new_balance": profile.coins_balance
+            "new_balance": profile.coins_balance,
         }, status=200)
 
 class DailyRewardView(APIView):
     """
     Получение ежедневного бонуса (энергии).
-    Проверяет время с момента последнего начисления в профиле пользователя.
-    Если кулдаун (24 часа) прошел — начисляет 15 монет.
+    Работает только если баланс меньше 30.
+    Защищено от двойного начисления через transaction.atomic + select_for_update.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         user = request.user
-        profile = user.profile
         now = timezone.now()
-        
+
         REWARD_AMOUNT = 15.0
         COOLDOWN_HOURS = 24
+        MAX_BALANCE_FOR_REWARD = 30.0
 
-        if profile.last_daily_reward:
-            time_since_last_reward = now - profile.last_daily_reward
-            if time_since_last_reward < timedelta(hours=COOLDOWN_HOURS):
-                time_left = timedelta(hours=COOLDOWN_HOURS) - time_since_last_reward
+        with transaction.atomic():
+            profile = user.profile.__class__.objects.select_for_update().get(user=user)
+
+            # Нельзя получать награду с большим балансом
+            if profile.coins_balance >= MAX_BALANCE_FOR_REWARD:
                 return Response({
                     "success": False,
-                    "message": "Ежедневная награда пока недоступна.",
-                    "seconds_left": int(time_left.total_seconds()),
-                    "balance": profile.coins_balance
-                }, status=200) 
+                    "message": f"Daily reward available only if balance is below {MAX_BALANCE_FOR_REWARD} ⚡️",
+                    "balance": profile.coins_balance,
+                }, status=403)
 
-        profile.coins_balance += REWARD_AMOUNT
-        profile.last_daily_reward = now
-        profile.save()
+            # Проверка кулдауна
+            if profile.last_daily_reward:
+                time_since_last_reward = now - profile.last_daily_reward
 
-        return Response({
-            "success": True,
-            "message": f"Получено {REWARD_AMOUNT} ⚡️",
-            "seconds_left": COOLDOWN_HOURS * 3600, 
-            "balance": profile.coins_balance
-        }, status=200)
+                if time_since_last_reward < timedelta(hours=COOLDOWN_HOURS):
+                    time_left = timedelta(hours=COOLDOWN_HOURS) - time_since_last_reward
+
+                    return Response({
+                        "success": False,
+                        "message": "Ежедневная награда пока недоступна.",
+                        "seconds_left": int(time_left.total_seconds()),
+                        "balance": profile.coins_balance,
+                    }, status=200)
+
+            # Начисление
+            profile.coins_balance += REWARD_AMOUNT
+            profile.last_daily_reward = now
+
+            profile.save(update_fields=[
+                "coins_balance",
+                "last_daily_reward"
+            ])
+
+            return Response({
+                "success": True,
+                "message": f"Получено {REWARD_AMOUNT} ⚡️",
+                "seconds_left": COOLDOWN_HOURS * 3600,
+                "balance": profile.coins_balance,
+            }, status=200)
 
 class AddEnergyView(APIView):
     """
@@ -260,7 +304,7 @@ class AddEnergyView(APIView):
             status=status.HTTP_403_FORBIDDEN
         )
     
-    
+
 class AIChatView(APIView):
     """
     Главный шлюз для общения с нейросетью.
