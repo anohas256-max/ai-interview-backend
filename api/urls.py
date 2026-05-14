@@ -12,6 +12,7 @@ from .views import (
     CheckEmailView,
     ChangePasswordView,
     StartSessionView,
+    DailyRewardStatusView,
     DailyRewardView,
 )
 
@@ -33,5 +34,17 @@ urlpatterns = [
 
     path("start-session/", StartSessionView.as_view(), name="start-session"),
     path("chat/", AIChatView.as_view(), name="ai-chat"),
-    path("daily-reward/", DailyRewardView.as_view(), name="daily-reward"),
+
+    # Daily reward
+    path(
+        "daily-reward/status/",
+        DailyRewardStatusView.as_view(),
+        name="daily-reward-status",
+    ),
+
+    path(
+        "daily-reward/",
+        DailyRewardView.as_view(),
+        name="daily-reward",
+    ),
 ]

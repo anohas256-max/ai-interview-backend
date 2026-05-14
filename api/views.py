@@ -19,7 +19,8 @@ from .serializers import (
     InterviewTemplateSerializer, 
     SessionHistorySerializer, 
     RegisterSerializer, 
-    UserSerializer
+    UserSerializer,
+    StartSessionSerializer,
 )
 from .permissions import IsAdminOrReadOnly
 
@@ -178,12 +179,13 @@ class StartSessionView(APIView):
 
     def post(self, request):
         user = request.user
-        data = request.data
+        serializer = StartSessionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        config = data.get("config", {})
+        config = serializer.validated_data["config"]
 
-        question_limit = int(config.get("questionLimit", 5))
-        is_endless = bool(config.get("isEndlessMode", False))
+        question_limit = config.get("questionLimit", 5)
+        is_endless = config.get("isEndlessMode", False)
 
         if question_limit < 1:
             return Response(
@@ -229,6 +231,53 @@ class StartSessionView(APIView):
             "session_id": new_session.id,
             "cost": cost,
             "new_balance": profile.coins_balance,
+        }, status=200)
+
+
+class DailyRewardStatusView(APIView):
+    """
+    Проверка статуса ежедневного бонуса.
+    Ничего не начисляет.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = request.user.profile
+        now = timezone.now()
+
+        REWARD_AMOUNT = 15.0
+        COOLDOWN_HOURS = 24
+        MAX_BALANCE_FOR_REWARD = 30.0
+
+        if profile.coins_balance >= MAX_BALANCE_FOR_REWARD:
+            return Response({
+                "available": False,
+                "reason": "balance_too_high",
+                "seconds_left": 0,
+                "reward_amount": REWARD_AMOUNT,
+                "balance": profile.coins_balance,
+            }, status=200)
+
+        if profile.last_daily_reward:
+            time_since_last_reward = now - profile.last_daily_reward
+
+            if time_since_last_reward < timedelta(hours=COOLDOWN_HOURS):
+                time_left = timedelta(hours=COOLDOWN_HOURS) - time_since_last_reward
+
+                return Response({
+                    "available": False,
+                    "reason": "cooldown",
+                    "seconds_left": int(time_left.total_seconds()),
+                    "reward_amount": REWARD_AMOUNT,
+                    "balance": profile.coins_balance,
+                }, status=200)
+
+        return Response({
+            "available": True,
+            "reason": "ready",
+            "seconds_left": 0,
+            "reward_amount": REWARD_AMOUNT,
+            "balance": profile.coins_balance,
         }, status=200)
 
 class DailyRewardView(APIView):

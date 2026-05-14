@@ -92,3 +92,45 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         # Обязательно добавь "coins_balance" в список полей
         fields = ("id", "username", "email", "coins_balance")
+
+
+class SessionConfigSerializer(serializers.Serializer):
+    questionLimit = serializers.IntegerField(
+        min_value=1,
+        max_value=100,
+        required=False,
+        default=5,
+    )
+
+    isEndlessMode = serializers.BooleanField(
+        required=False,
+        default=False,
+    )
+
+    language = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=50,
+    )
+
+    role = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+    )
+
+    difficulty = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=100,
+    )
+
+    modelName = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+    )
+
+
+class StartSessionSerializer(serializers.Serializer):
+    config = SessionConfigSerializer()
