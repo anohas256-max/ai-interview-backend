@@ -14,12 +14,14 @@ from .views import (
     StartSessionView,
     DailyRewardStatusView,
     DailyRewardView,
+    UserCustomPresetViewSet,
 )
 
 router = DefaultRouter()
 router.register("categories", CategoryViewSet, basename="categories")
 router.register("templates", InterviewTemplateViewSet, basename="templates")
 router.register("history", SessionHistoryViewSet, basename="history")
+router.register("custom-presets", UserCustomPresetViewSet, basename="custom-presets")
 
 urlpatterns = [
     path("", include(router.urls)),

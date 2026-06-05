@@ -51,6 +51,34 @@ class InterviewTemplate(models.Model):
         verbose_name = "Шаблон интервью"
         verbose_name_plural = "Шаблоны интервью"
 
+class UserCustomPreset(models.Model):
+    """
+    Пользовательские роли/темы, сохранённые на аккаунт.
+    Видит только владелец.
+    """
+    TYPE_CHOICES = (
+        ("roleplay", "Сюжетная роль"),
+        ("quiz", "Тема квиза"),
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="custom_presets",
+    )
+    mode = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Пользовательский пресет"
+        verbose_name_plural = "Пользовательские пресеты"
+        ordering = ["-created_at"]
+        unique_together = ("user", "mode", "title")
+
+    def __str__(self):
+        return f"{self.user.username}: {self.mode} — {self.title}"
+
 class SessionHistory(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="history", help_text="Пользователь, проходящий интервью")
     template = models.ForeignKey(InterviewTemplate, on_delete=models.SET_NULL, null=True, related_name="history", help_text="Использованный шаблон (опционально)")

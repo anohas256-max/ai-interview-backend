@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Category, InterviewTemplate, SessionHistory
+from .models import Category, InterviewTemplate, SessionHistory, UserCustomPreset
 
 User = get_user_model()
 
@@ -96,7 +96,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class SessionConfigSerializer(serializers.Serializer):
     questionLimit = serializers.IntegerField(
-        min_value=1,
+        min_value=3,
         max_value=100,
         required=False,
         default=5,
@@ -134,3 +134,25 @@ class SessionConfigSerializer(serializers.Serializer):
 
 class StartSessionSerializer(serializers.Serializer):
     config = SessionConfigSerializer()
+
+class UserCustomPresetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserCustomPreset
+        fields = ("id", "mode", "title", "created_at")
+        read_only_fields = ("id", "created_at")
+
+    def validate_title(self, value):
+        value = " ".join(value.strip().split())
+
+        if len(value) < 2:
+            raise serializers.ValidationError("Title is too short.")
+
+        if len(value) > 100:
+            raise serializers.ValidationError("Title is too long.")
+
+        return value
+
+    def validate_mode(self, value):
+        if value not in ("roleplay", "quiz"):
+            raise serializers.ValidationError("Invalid mode.")
+        return value

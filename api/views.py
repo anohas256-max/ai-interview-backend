@@ -13,7 +13,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from .models import Category, InterviewTemplate, SessionHistory
+from .models import Category, InterviewTemplate, SessionHistory, UserCustomPreset
 from .serializers import (
     CategorySerializer, 
     InterviewTemplateSerializer, 
@@ -21,6 +21,7 @@ from .serializers import (
     RegisterSerializer, 
     UserSerializer,
     StartSessionSerializer,
+    UserCustomPresetSerializer,
 )
 from .permissions import IsAdminOrReadOnly
 
@@ -35,6 +36,41 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
+
+
+class UserCustomPresetViewSet(viewsets.ModelViewSet):
+    """
+    Пользовательские кастомные роли/темы.
+    Привязаны к аккаунту, а не к устройству.
+    """
+    serializer_class = UserCustomPresetSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = UserCustomPreset.objects.filter(user=self.request.user)
+
+        mode = self.request.query_params.get("mode")
+        if mode in ("roleplay", "quiz"):
+            queryset = queryset.filter(mode=mode)
+
+        return queryset.order_by("-created_at")
+
+    def perform_create(self, serializer):
+        title = serializer.validated_data["title"]
+        mode = serializer.validated_data["mode"]
+
+        existing = UserCustomPreset.objects.filter(
+            user=self.request.user,
+            mode=mode,
+            title__iexact=title,
+        ).first()
+
+        if existing:
+            serializer.instance = existing
+            return
+
+        serializer.save(user=self.request.user)
+
 
 class InterviewTemplateViewSet(viewsets.ModelViewSet):
     """
@@ -187,9 +223,9 @@ class StartSessionView(APIView):
         question_limit = config.get("questionLimit", 5)
         is_endless = config.get("isEndlessMode", False)
 
-        if question_limit < 1:
+        if question_limit < 3:
             return Response(
-                {"error": "questionLimit must be greater than 0"},
+                {"error": "questionLimit must be at least 3"},
                 status=400
             )
 
@@ -447,6 +483,29 @@ class AIChatView(APIView):
                 "ЗАЩИТА ОТ ТРОЛЛИНГА: Если пользователь откровенно издевается, спамит бессвязным бредом (например 'не', 'а', 'ы', '123'), матерится или посылает тебя — ты ОБЯЗАН ответить. Сначала напиши 2-3 предложения с максимально строгим и холодным отказом (укажи на недопустимость такого поведения). И ТОЛЬКО ПОСЛЕ ЭТОГО ТЕКСТА, в самом конце сообщения, добавь тег [FAIL]. Никогда не присылай тег [FAIL] без текстового пояснения. ВНИМАНИЕ: Честное признание 'я не знаю' — это НЕ троллинг, за это прерывать сессию запрещено."
             )
 
+
+            brevity_rule = (
+                "BREVITY RULE: Keep every normal reply short. Maximum 4 sentences. "
+                "Do not write long explanations, long lists, or full solutions unless the user explicitly asks for a detailed explanation. "
+                "If you need to correct the candidate, give only the key correction and one next question."
+            ) if is_eng else (
+                "ПРАВИЛО КРАТКОСТИ: Каждый обычный ответ должен быть коротким. Максимум 4 предложения. "
+                "Не пиши длинные объяснения, длинные списки и полный разбор задачи, если пользователь явно не попросил подробное объяснение. "
+                "Если нужно исправить кандидата, дай только ключевую правку и один следующий вопрос."
+            )
+
+            bad_answer_rule = (
+                "BAD ANSWER RULE: If the candidate's answer is empty, only a greeting, random text, off-topic, or does not answer the question, "
+                "do NOT solve the task for the candidate. Do NOT praise them. Do NOT invent meaning in their answer. "
+                "Reply in 1-2 sentences that the answer is not accepted and ask them to answer the same question properly. "
+                "If the question limit is already reached, mark the answer as weak/invalid and end the session."
+            ) if is_eng else (
+                "ПРАВИЛО ПЛОХОГО ОТВЕТА: Если ответ кандидата пустой, состоит только из приветствия, случайного текста, не по теме или не отвечает на вопрос, "
+                "НЕ решай задачу за кандидата. НЕ хвали его. НЕ придумывай смысл в его ответе. "
+                "Ответь 1-2 предложениями, что ответ не засчитан, и попроси нормально ответить на тот же вопрос. "
+                "Если лимит вопросов уже исчерпан, оцени ответ как слабый/некорректный и заверши сессию."
+            )
+
             lang_rule = (
                 "CRITICAL RULE: YOU MUST SPEAK EXCLUSIVELY IN ENGLISH. ALL YOUR RESPONSES, QUESTIONS AND FEEDBACK MUST BE IN ENGLISH."
             ) if is_eng else (
@@ -462,7 +521,10 @@ class AIChatView(APIView):
                     f"3. LORE: Questions must STRICTLY follow the universe's canon.\n4. {anti_troll_rule}\n"
                     f"5. DRILL-DOWN MODE: If the candidate answers correctly, NEVER praise them. Instead, immediately complicate the condition.\n"
                     f"6. DYNAMICS AND TOPIC CHANGE: You have a question limit. DO NOT stall on one topic for more than 2 messages! Asked -> answered -> 1 clarification -> MOVE TO A NEW TOPIC.\n"
-                    f"7. {lang_rule}\n{memory_block}"
+                    f"7. {lang_rule}\n"
+                    f"8. {brevity_rule}\n"
+                    f"9. {bad_answer_rule}\n"
+                    f"{memory_block}"
                 ) if is_eng else (
                     f"Ты проводишь сюжетное собеседование. Роль кандидата: '{role}'. Уровень сложности: {difficulty}.\n"
                     f"Твой характер: {persona}, Стиль: {feedback_style}.\nПРАВИЛА:\n"
@@ -471,7 +533,10 @@ class AIChatView(APIView):
                     f"3. ЛОР: Вопросы должны СТРОГО соответствовать канону вселенной.\n4. {anti_troll_rule}\n"
                     f"5. РЕЖИМ «ДОЖИМ» (Drill-Down): Если кандидат отвечает правильно, НИКОГДА не хвали его. Вместо этого сразу усложни условие задачи.\n"
                     f"6. ДИНАМИКА И СМЕНА ТЕМ: У тебя лимит вопросов. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО топтаться на одной теме больше 2 сообщений! Задал вопрос -> получил ответ -> задал 1 уточнение -> СРАЗУ ПЕРЕХОДИШЬ К АБСОЛЮТНО НОВОЙ ТЕМЕ.\n"
-                    f"7. {lang_rule}\n{memory_block}"
+                    f"7. {lang_rule}\n"
+                    f"8. {brevity_rule}\n"
+                    f"9. {bad_answer_rule}\n"
+                    f"{memory_block}"
                 )
             else:
                 difficulty_rules = ""
@@ -486,7 +551,10 @@ class AIChatView(APIView):
                     f"2. DIALOG FORMAT: Ask ONE question at a time. Wait for an answer. Briefly evaluate it, correct mistakes if any, and IMMEDIATELY ask the next question.\n"
                     f"3. {anti_troll_rule}\n4. DYNAMICS: Test from different angles. Strictly change subtopics. Do not loop on one concept!\n"
                     f"5. If user says 'I don't know' - briefly explain and move on.\n6. If user asks to clarify the question - do it, do not count it as a mistake.\n"
-                    f"7. {lang_rule}\n{memory_block}"
+                    f"7. {lang_rule}\n"
+                    f"8. {brevity_rule}\n"
+                    f"9. {bad_answer_rule}\n"
+                    f"{memory_block}"
                 ) if is_eng else (
                     f"Ты — нейросеть-экзаменатор. Твоя задача — проверить знания пользователя по теме (или профессии): '{role}'.\n"
                     f"Стиль общения: {feedback_style}.\nУРОВЕНЬ СЛОЖНОСТИ: {difficulty}. {difficulty_rules}\n\nПРАВИЛА:\n"
@@ -495,14 +563,26 @@ class AIChatView(APIView):
                     f"3. {anti_troll_rule}\n4. ДИНАМИКА ТЕМ: Ты должен протестировать пользователя с разных сторон темы. СТРОГО меняй подтему. Не зацикливайся на одном и том же понятии!\n"
                     f"5. Если пользователь отвечает 'не знаю' — кратко объясни суть и переходи к следующему вопросу.\n"
                     f"6. Если пользователь просит уточнить или перефразировать вопрос — сделай это, не считая за ошибку.\n"
-                    f"7. {lang_rule}\n{memory_block}"
+                    f"7. {lang_rule}\n"
+                    f"8. {brevity_rule}\n"
+                    f"9. {bad_answer_rule}\n"
+                    f"{memory_block}"
                 )
-
             if is_limit_reached:
                 if is_eng:
-                    sys_inst += "\n\nCRITICAL OVERRIDE: THE INTERVIEW IS OVER. Evaluate the last answer, say goodbye, and MUST append [END] at the end of your response. DO NOT ASK ANY MORE QUESTIONS."
+                    sys_inst += (
+                        "\n\nCRITICAL OVERRIDE: THE INTERVIEW IS OVER. "
+                        "Evaluate ONLY the candidate's last answer, not your own previous explanation. "
+                        "If the last answer was empty, greeting-only, random, off-topic, or invalid, clearly say it was not accepted and keep the final message short. "
+                        "Maximum 3 sentences. MUST append [END] at the end. DO NOT ASK ANY MORE QUESTIONS."
+                    )
                 else:
-                    sys_inst += "\n\nКРИТИЧЕСКОЕ ПРАВИЛО: ЛИМИТ ВОПРОСОВ ИСЧЕРПАН. Оцени последний ответ, попрощайся и ОБЯЗАТЕЛЬНО добавь тег [END] в конце. НИКАКИХ НОВЫХ ВОПРОСОВ."
+                    sys_inst += (
+                        "\n\nКРИТИЧЕСКОЕ ПРАВИЛО: ЛИМИТ ВОПРОСОВ ИСЧЕРПАН. "
+                        "Оценивай ТОЛЬКО последний ответ кандидата, а не своё предыдущее объяснение. "
+                        "Если последний ответ был пустым, только приветствием, случайным текстом, не по теме или некорректным — прямо скажи, что ответ не засчитан, и пиши коротко. "
+                        "Максимум 3 предложения. ОБЯЗАТЕЛЬНО добавь [END] в конце. НИКАКИХ НОВЫХ ВОПРОСОВ."
+                    )
 
             api_messages = [{"role": "system", "content": sys_inst}]
             for msg in messages_history:
@@ -518,7 +598,7 @@ class AIChatView(APIView):
             response = requests.post(
                 'https://openrouter.ai/api/v1/chat/completions',
                 headers={'Authorization': f'Bearer {settings.OPENROUTER_API_KEY}'},
-                json={"model": config.get("modelName", "google/gemini-2.0-flash-exp:free"), "messages": api_messages, "max_tokens": 1000},
+                json={"model": config.get("modelName", "google/gemini-2.0-flash-exp:free"), "messages": api_messages, "max_tokens": 350},
                 timeout=60
             )
             response.raise_for_status()
